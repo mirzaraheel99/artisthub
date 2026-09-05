@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.expo/
+.expo-shared/
+*.log
+
+# Secrets and per-machine config
+.env
+.env.*
+!.env.example
+
+# Fetched at setup time, not vendored (see infra/supabase/scripts/setup.sh)
+infra/supabase/stack/
+infra/supabase/backups/
+
+.DS_Store
+*.tsbuildinfo

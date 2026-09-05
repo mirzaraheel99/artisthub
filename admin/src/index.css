@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+/* Brand tokens. Gold is the primary action colour, purple the secondary —
+   used for progress, reward states and sponsor tiers so the two never compete
+   for the same job. Change them here and both the admin and the app follow
+   (the app reads the same values from mobile/src/theme.ts). */
+@theme {
+  --color-ink-950: #0a0a0a;
+  --color-ink-900: #111111;
+  --color-ink-850: #171717;
+  --color-ink-800: #1f1f1f;
+  --color-ink-700: #2e2e2e;
+  --color-ink-400: #8b8b8b;
+  --color-ink-200: #d4d4d4;
+
+  --color-gold-500: #ffb800;
+  --color-gold-600: #d99c00;
+  --color-purple-500: #7c3aed;
+  --color-purple-600: #6428d4;
+
+  --color-danger-500: #ef4444;
+  --color-success-500: #22c55e;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-200);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* Display face for headings — heavy and wide, album-cover energy. */
+.font-display {
+  font-family: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}

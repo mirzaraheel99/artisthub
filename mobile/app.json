@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "Artist Hub",
+    "slug": "artisthub",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "artisthub",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0A0A0A",
+    "splash": {
+      "backgroundColor": "#0A0A0A",
+      "resizeMode": "contain"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.artisthub.app",
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "spotify",
+          "youtube",
+          "vnd.youtube",
+          "music",
+          "itms-apps",
+          "instagram",
+          "tiktok"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.artisthub.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0A0A0A"
+      }
+    }
+  }
+}
