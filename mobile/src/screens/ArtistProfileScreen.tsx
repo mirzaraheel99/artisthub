@@ -24,6 +24,7 @@ import {
 import type { Artist, ArtistSocial, LinkPlatform } from '../lib/types';
 import type { RootStackParamList } from '../navigation';
 import { colors, radius, spacing, type } from '../theme';
+import { brand } from '../brand';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { ListenButtons } from '../components/ListenButtons';
 import { Grain } from '../components/Grain';
@@ -75,8 +76,8 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
     if (!artist) return;
     // Phase 2 swaps this for a referral link carrying the user's code.
     await Share.share({
-      message: `Check out ${artist.name} on Artist Hub`,
-      url: `artisthub://artist/${artist.id}`,
+      message: `Check out ${artist.name} on ${brand.name}`,
+      url: `${brand.webUrl}/artists/${artist.slug}`,
     });
   };
 

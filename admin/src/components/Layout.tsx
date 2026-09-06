@@ -1,12 +1,15 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { Button } from './ui';
+import { brand } from '../lib/brand';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/artists', label: 'Artists' },
   { to: '/rewards', label: 'Rewards' },
   { to: '/points', label: 'Earning' },
+  { to: '/users', label: 'Users' },
+  { to: '/review', label: 'Review queue' },
 ];
 
 export function Layout() {
@@ -16,7 +19,7 @@ export function Layout() {
     <div className="flex min-h-full">
       <aside className="flex w-56 shrink-0 flex-col border-r border-ink-800 bg-ink-900 px-4 py-6">
         <div className="px-2">
-          <p className="font-display text-lg leading-none text-gold-500">ARTIST HUB</p>
+          <p className="font-display text-lg leading-none text-gold-500">{brand.wordmark}</p>
           <p className="mt-1 text-[11px] uppercase tracking-widest text-ink-400">Admin</p>
         </div>
 

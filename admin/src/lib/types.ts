@@ -45,6 +45,8 @@ export type Profile = {
   birthday: string | null;
   is_banned: boolean;
   ban_reason: string | null;
+  banned_at: string | null;
+  banned_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -182,6 +184,18 @@ export type Referral = {
   confirming_redemption_id: string | null;
 };
 
+export type AbuseFlag = {
+  id: string;
+  user_id: string | null;
+  flag_type: string;
+  severity: 'low' | 'medium' | 'high';
+  detail: Record<string, unknown>;
+  status: 'open' | 'dismissed' | 'actioned';
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+};
+
 export type Venue = {
   id: string;
   city_id: string;
@@ -301,6 +315,7 @@ export type Database = {
       reward_grants: Table<RewardGrant>;
       referrals: Table<Referral>;
       venues: Table<Venue>;
+      abuse_flags: Table<AbuseFlag>;
     };
     Views: Record<string, never>;
     Functions: {
@@ -330,6 +345,9 @@ export type Database = {
   };
 };
 
-// NOTE: this file is the canonical schema definition and is copied verbatim to
-// admin/src/lib/types.ts. Edit it here, then copy — editing the admin copy
-// alone will be silently overwritten on the next sync.
+// This file is the canonical schema definition for both apps. Edit it HERE,
+// then run ./scripts/sync-types.sh to copy it to admin/src/lib/types.ts.
+//
+// Both typecheck scripts run sync-types.sh --check first, so a drifted copy
+// fails loudly. It previously failed as "not assignable to type 'never'", which
+// does not obviously mean "a table is missing from your types file".

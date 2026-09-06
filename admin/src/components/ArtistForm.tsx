@@ -4,6 +4,7 @@ import { usePlatforms, validateAgainstPattern, slugify, generateInstallCode } fr
 import type { Artist } from '../lib/types';
 import { Button, Card, Field, Input, Spinner, Textarea } from './ui';
 import { ImageUpload } from './ImageUpload';
+import { artistInstallUrl } from '../lib/brand';
 
 export function ArtistForm({
   artist,
@@ -153,7 +154,7 @@ export function ArtistForm({
 
           {artist ? (
             <Field label="Install link" hint="Give this to the artist to post. Installs through it are attributed to them.">
-              <Input readOnly value={`https://YOUR-DOMAIN/a/${artist.install_code}`} />
+              <Input readOnly value={artistInstallUrl(artist.install_code)} />
             </Field>
           ) : null}
         </Card>

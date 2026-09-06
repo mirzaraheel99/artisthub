@@ -24,6 +24,7 @@ import {
 import type { Artist } from '../lib/types';
 import type { RootStackParamList, TabParamList } from '../navigation';
 import { colors, radius, spacing, type } from '../theme';
+import { brand } from '../brand';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { PressableScale } from '../components/PressableScale';
 import { Grain } from '../components/Grain';
@@ -84,7 +85,7 @@ export function DiscoverScreen({ navigation }: Props) {
       contentContainerStyle={{ paddingTop: insets.top + spacing.md, paddingBottom: spacing.xxl }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.gold} />}
     >
-      <Text style={styles.wordmark}>ARTIST HUB</Text>
+      <Text style={styles.wordmark}>{brand.wordmark}</Text>
 
       {featured ? (
         <FeaturedBanner

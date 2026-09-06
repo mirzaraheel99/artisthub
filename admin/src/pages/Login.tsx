@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useAuth } from '../lib/auth';
 import { Button, Card, Field, Input } from '../components/ui';
+import { brand } from '../lib/brand';
 
 export function Login() {
   const { signIn } = useAuth();
@@ -24,7 +25,7 @@ export function Login() {
   return (
     <div className="flex min-h-full items-center justify-center px-4">
       <Card className="w-full max-w-sm">
-        <h1 className="font-display text-2xl text-ink-200">Artist Hub</h1>
+        <h1 className="font-display text-2xl text-ink-200">{brand.name}</h1>
         <p className="mt-1 text-sm text-ink-400">Admin dashboard</p>
 
         <form onSubmit={submit} className="mt-6 space-y-4">

@@ -7,6 +7,8 @@ import { Artists } from './pages/Artists';
 import { ArtistDetail } from './pages/ArtistDetail';
 import { Rewards } from './pages/Rewards';
 import { Points } from './pages/Points';
+import { Users } from './pages/Users';
+import { Abuse } from './pages/Abuse';
 import { Card, Button, Spinner } from './components/ui';
 
 function Gate() {
@@ -42,6 +44,8 @@ function Gate() {
         <Route path="artists/:artistId" element={<ArtistDetail />} />
         <Route path="rewards" element={<Rewards />} />
         <Route path="points" element={<Points />} />
+        <Route path="users" element={<Users />} />
+        <Route path="review" element={<Abuse />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

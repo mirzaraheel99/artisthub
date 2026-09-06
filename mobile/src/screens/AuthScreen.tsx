@@ -18,6 +18,7 @@ import {
   watchForReferral,
 } from '../lib/referral';
 import { colors, radius, spacing, type } from '../theme';
+import { brand } from '../brand';
 import { FormError, PrimaryButton, TextButton, TextField } from '../components/form';
 
 type Mode = 'signup' | 'signin';
@@ -116,10 +117,10 @@ export function AuthScreen() {
         ]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.wordmark}>ARTIST HUB</Text>
+        <Text style={styles.wordmark}>{brand.wordmark}</Text>
         <Text style={styles.tagline}>
           {mode === 'signup'
-            ? 'Follow the roster, bring your people, eat free.'
+            ? brand.tagline
             : 'Welcome back.'}
         </Text>
 

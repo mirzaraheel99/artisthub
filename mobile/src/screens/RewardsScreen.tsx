@@ -15,6 +15,7 @@ import { supabase } from '../lib/supabase';
 import { useSession } from '../lib/session';
 import { AuthScreen } from './AuthScreen';
 import { colors, radius, spacing, type } from '../theme';
+import { brand, referralUrl } from '../brand';
 import { ErrorState, LoadingState } from '../components/states';
 
 type Grant = {
@@ -103,8 +104,8 @@ export function RewardsScreen() {
     if (!profile) return;
     await Share.share({
       message:
-        `Get on Artist Hub — the roster, the drops, and a free plate at the lounge. ` +
-        `Use my code ${profile.referral_code}`,
+        `Get on ${brand.name} — the roster, the drops, and a free plate at ${brand.venueNoun}. ` +
+        `Use my code ${profile.referral_code}\n${referralUrl(profile.referral_code)}`,
     });
   };
 
