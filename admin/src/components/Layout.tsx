@@ -5,6 +5,8 @@ import { Button } from './ui';
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/artists', label: 'Artists' },
+  { to: '/rewards', label: 'Rewards' },
+  { to: '/points', label: 'Earning' },
 ];
 
 export function Layout() {

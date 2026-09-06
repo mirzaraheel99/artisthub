@@ -218,6 +218,10 @@ export type Database = {
       point_rules: Table<PointRule>;
       blackout_rules: Table<BlackoutRule>;
       reward_catalog: Table<RewardCatalogItem>;
+      reward_venues: Table<
+        { reward_id: string; venue_id: string },
+        { reward_id: string; venue_id: string }
+      >;
       reward_grants: Table<RewardGrant>;
       referrals: Table<Referral>;
       venues: Table<Venue>;
