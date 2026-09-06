@@ -28,6 +28,8 @@ report() {           # report <label> <ok|fail>
 # --------------------------------------------------------------------------
 $PSQL -q <<'SQL'
 delete from public.point_transactions where note = 'concurrency-fixture';
+delete from public.redemption_operations where grant_id in
+  (select id from public.reward_grants where redemption_code in ('CONCUR01','CONCUR02'));
 delete from public.reward_grants  where redemption_code in ('CONCUR01','CONCUR02');
 delete from public.venue_staff    where user_id = '00000000-0000-0000-0000-0000000cc003';
 delete from public.profiles       where id::text like '00000000-0000-0000-0000-0000000cc%';
@@ -58,13 +60,30 @@ insert into public.reward_catalog
 values ('00000000-0000-0000-0000-0000000cc005', 'Concurrency Test Reward',
         100, 300, 1599, false, 90, true);
 
-insert into public.reward_grants (user_id, reward_id, redemption_code, expires_at)
+insert into public.reward_grants (
+  user_id, reward_id, redemption_code, expires_at,
+  terms_reward_name, terms_requires_purchase, terms_max_per_visit,
+  terms_unit_cost_cents, terms_menu_value_cents)
 values ('00000000-0000-0000-0000-0000000cc004', '00000000-0000-0000-0000-0000000cc005',
-        'CONCUR01', now() + interval '30 days');
+        'CONCUR01', now() + interval '30 days',
+        'Concurrency Test Reward', false, 1, 300, 1599);
 
 -- Exactly enough points for ONE purchase, so a double-spend would overdraw.
-insert into public.point_transactions (user_id, points, source_type, note)
-values ('00000000-0000-0000-0000-0000000cc004', 100, 'adjustment', 'concurrency-fixture');
+insert into public.point_transactions (user_id, points, source_type, source_id, note)
+values ('00000000-0000-0000-0000-0000000cc004', 100, 'adjustment',
+        'concurrency-fixture-seed', 'concurrency-fixture');
+SQL
+
+$PSQL -q <<'SQL'
+-- Two grants, one fan, one venue, one night. Locking grant A does not lock
+-- grant B, so without a visit-scoped lock both would pass the per-visit limit.
+insert into public.reward_grants (
+  user_id, reward_id, redemption_code, expires_at,
+  terms_reward_name, terms_requires_purchase, terms_max_per_visit,
+  terms_unit_cost_cents, terms_menu_value_cents)
+values ('00000000-0000-0000-0000-0000000cc004', '00000000-0000-0000-0000-0000000cc005',
+        'CONCUR02', now() + interval '30 days',
+        'Concurrency Test Reward', false, 1, 300, 1599);
 SQL
 
 STAFF_JWT='{"sub":"00000000-0000-0000-0000-0000000cc003","role":"authenticated"}'
@@ -110,6 +129,35 @@ REDEEMED=$($PSQL -tA -c "select count(*) from public.reward_grants where redempt
 [[ "$REDEEMED" == "1" ]] \
   && report "the grant is marked redeemed exactly once in the database" ok \
   || report "the grant is marked redeemed exactly once in the database (got $REDEEMED)" fail
+
+# --------------------------------------------------------------------------
+# F04: two DIFFERENT grants redeemed for the same visit.
+#
+# The per-grant row lock does nothing here — the two requests touch different
+# rows. Only a lock keyed on the visit stops both from reading zero prior
+# redemptions and both passing a limit of one.
+# --------------------------------------------------------------------------
+redeem_named() {     # redeem_named <code> <outfile>
+  $PSQL -tA -q > "$2" 2>&1 <<SQL
+begin;
+set local role authenticated;
+set local request.jwt.claims = '$STAFF_JWT';
+select public.redeem_code('$1', '00000000-0000-0000-0000-0000000cc002', true);
+commit;
+SQL
+}
+
+E_OUT=$(mktemp); F_OUT=$(mktemp)
+redeem_named CONCUR02 "$E_OUT" &
+redeem_named CONCUR02 "$F_OUT" &
+wait
+
+VISIT_REDEEMED=$($PSQL -tA -c "select count(*) from public.reward_grants where user_id='00000000-0000-0000-0000-0000000cc004' and redeemed_at is not null" | tr -d '[:space:]')
+[[ "$VISIT_REDEEMED" -le 1 ]] \
+  && report "the per-visit limit holds across different grants (redeemed $VISIT_REDEEMED)" ok \
+  || report "the per-visit limit holds across different grants (redeemed $VISIT_REDEEMED)" fail
+
+rm -f "$E_OUT" "$F_OUT"
 
 # --------------------------------------------------------------------------
 # Loophole 18: double-spend against a derived balance.

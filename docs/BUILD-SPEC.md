@@ -87,10 +87,13 @@ applications. The deployment must not disturb them.
 - The existing web server proxies a subdomain to the stack. Do not install a
   second reverse proxy. **[OPEN]** — which web server, and which ports are free,
   must be confirmed before writing the deploy config.
-- **A bare IP cannot be shipped to a mobile app.** No certificate authority
-  issues certs for IP addresses, so there is no HTTPS, and iOS App Transport
-  Security blocks cleartext. A domain with TLS is a prerequisite, not a polish
-  item.
+- **Ship a domain, not a bare IP.** An earlier draft claimed no certificate
+  authority issues IP certificates; that is no longer true — Let's Encrypt made
+  IP address certificates generally available in January 2026. The requirement
+  stands for other reasons: IP certificates are short-lived, an IP cannot move
+  between hosts without breaking every installed client, and universal links
+  and store review both expect a stable domain. A domain with TLS is a
+  prerequisite, not a polish item.
 - `SERVICE_ROLE_KEY` bypasses all RLS. Server-side only. Never in a mobile
   bundle, a web bundle, or a repository.
 - `ENABLE_EMAIL_AUTOCONFIRM` must be `false` before any real user exists.
@@ -531,15 +534,22 @@ control.** A read-then-write, or a check in application code, loses the race whe
 two staff members scan the same screenshot simultaneously — and that is exactly
 what will be attempted.
 
-4. Additional checks, all server-side:
+4. **`purchase_made` is staff attestation, not proof.** It is a parameter the
+   staff app supplies, so a colluding employee can set it. Until the till is
+   integrated, the "every payout is funded by a purchase" claim is an
+   operational policy backed by the staff audit trail, not something the
+   database enforces. Label the pilot staff-attested, cap its exposure, and
+   reconcile against receipts weekly. **[OPEN]** — POS integration.
+
+5. Additional checks, all server-side:
    - Blackout window, evaluated in the **venue's** timezone, not the device's.
    - `requires_purchase` → staff must confirm a purchase was made.
    - `max_per_user_per_visit` against today's redemptions.
    - Staff is active at this venue.
-5. On success: write `venue_visits`, award points via `point_transactions`, and
+6. On success: write `venue_visits`, award points via `point_transactions`, and
    if this grant is a welcome offer, confirm the corresponding referral and award
    the referrer.
-6. Return an unmistakable full-screen result. Redemption happens in a dark, loud
+7. Return an unmistakable full-screen result. Redemption happens in a dark, loud
    room — colour alone is not enough; state the outcome in words.
 
 ### Refusal reasons, each with its own plain-language message
@@ -597,7 +607,10 @@ All admin-configurable. All enforced server-side.
 Welcome offer for a referred friend: mozzarella sticks, `requires_purchase = true`.
 
 Expect roughly 1–3% of users to refer anyone at all, and the median referrer to
-bring one person. Budget from that distribution, not from the ladder.
+bring one person. **These are industry rules of thumb, not measured figures for
+this business**, and the same applies to the 30–50% breakage assumption behind
+reward expiry. Treat both as unknown until the pilot measures them; budget the
+worst case, where every issued reward is redeemed.
 
 ---
 
@@ -827,6 +840,7 @@ at the database level, with a test that demonstrates it.
 
 | # | Decision | Status |
 |---|---|---|
+| 0 | **Reward inventory must be tobacco-free.** Free hookah is a free tobacco product: Apple 1.4.3 restricts apps encouraging tobacco use, Google restricts tobacco promotion, and FDA rules prohibit free distribution of tobacco products. This is a store-rejection and regulatory question, not an age-gate one. Replace the top tier with food before any public release; take product-specific legal advice before reinstating it. | **Blocking release** |
 | 1 | Label / app name — baked into bundle identifiers at submission | **Blocking** |
 | 2 | Server inventory: listening ports, existing containers, web server | **Blocking deploy** |
 | 3 | Domain for the API, and TLS termination | **Blocking mobile release** |

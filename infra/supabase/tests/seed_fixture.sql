@@ -5,11 +5,11 @@
 insert into public.cities (id, name, state, timezone)
 values ('00000000-0000-0000-0000-00000000c001', 'Houston', 'TX', 'America/Chicago');
 
-insert into public.venues (id, city_id, name, timezone, is_owned)
+insert into public.venues (id, city_id, name, timezone, business_day_cutoff, is_owned)
 values ('00000000-0000-0000-0000-00000000e001', '00000000-0000-0000-0000-00000000c001',
-        'The Lounge', 'America/Chicago', true),
+        'The Lounge', 'America/Chicago', '04:00', true),
        ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-00000000c001',
-        'Partner Venue (Dallas)', 'America/Chicago', false);
+        'Partner Venue (Dallas)', 'America/Chicago', '04:00', false);
 
 -- Users. The signup trigger creates profiles, roles and referral rows.
 insert into auth.users (id, email) values

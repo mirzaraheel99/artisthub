@@ -252,5 +252,131 @@ select pg_temp.report('spending more points than you hold is refused',
   (public.spend_points('00000000-0000-0000-0000-00000000ff03') ->> 'reason')
     = 'insufficient_points');
 
+-- =========================================================================
+-- Regressions from the September 2026 pressure test.
+-- Each one names the finding it closes.
+-- =========================================================================
+reset role;
+
+-- F05: NULLs are distinct in a unique index, so a null rule_code would let two
+-- identical ledger rows coexist and the idempotency key would do nothing.
+do $$
+declare ok boolean := false;
+begin
+  insert into public.point_transactions (user_id, points, source_type, source_id)
+  values ('00000000-0000-0000-0000-00000000a001', 10, 'adjustment', 'dup-test');
+  begin
+    insert into public.point_transactions (user_id, points, source_type, source_id)
+    values ('00000000-0000-0000-0000-00000000a001', 10, 'adjustment', 'dup-test');
+  exception when others then ok := true;
+  end;
+  raise notice '% - F05: a null-rule ledger row cannot be duplicated',
+    case when ok then 'PASS' else 'FAIL' end;
+end $$;
+
+select pg_temp.must_fail('F05: a ledger row cannot be written without a source',
+  $$insert into public.point_transactions (user_id, points, source_type)
+    values ('00000000-0000-0000-0000-00000000a001', 10, 'adjustment')$$);
+
+-- F09: an admin editing the catalogue must not reinterpret an outstanding grant.
+do $$
+declare g public.reward_grants; r jsonb;
+begin
+  g := public.issue_reward('00000000-0000-0000-0000-00000000a001',
+                           '00000000-0000-0000-0000-00000000ff02');
+  raise notice '% - F09: terms are copied onto the grant at issuance',
+    case when g.terms_reward_name = 'Free Wings' and g.terms_requires_purchase
+         then 'PASS' else 'FAIL' end;
+
+  -- Flip the live catalogue underneath the outstanding grant.
+  update public.reward_catalog set requires_purchase = false, name = 'Renamed'
+    where id = '00000000-0000-0000-0000-00000000ff02';
+
+  perform set_config('request.jwt.claims',
+    '{"sub":"00000000-0000-0000-0000-00000000a003","role":"authenticated"}', true);
+  r := public.redeem_code(g.redemption_code, '00000000-0000-0000-0000-00000000e001', false);
+
+  raise notice '% - F09: a live catalogue edit does not loosen an issued grant (%)',
+    case when r->>'reason' = 'purchase_required' then 'PASS' else 'FAIL' end,
+    coalesce(r->>'reason','ok');
+end $$;
+
+-- F07: a grant restricted to one venue must be refused everywhere else.
+do $$
+declare g public.reward_grants; r jsonb;
+begin
+  insert into public.reward_venues (reward_id, venue_id)
+  values ('00000000-0000-0000-0000-00000000ff03', '00000000-0000-0000-0000-00000000e001');
+
+  g := public.issue_reward('00000000-0000-0000-0000-00000000a004',
+                           '00000000-0000-0000-0000-00000000ff03');
+
+  insert into public.venue_staff (venue_id, user_id)
+  values ('00000000-0000-0000-0000-00000000e002', '00000000-0000-0000-0000-00000000a003');
+
+  r := public.redeem_code(g.redemption_code, '00000000-0000-0000-0000-00000000e002', true);
+  raise notice '% - F07: a Houston-only grant is refused at the Dallas venue (%)',
+    case when r->>'reason' = 'not_valid_at_this_venue' then 'PASS' else 'FAIL' end,
+    r->>'reason';
+end $$;
+
+-- F10: a committed redemption whose response was lost must replay, not refuse.
+do $$
+declare g public.reward_grants; first jsonb; again jsonb; mismatch jsonb;
+begin
+  g := public.issue_reward('00000000-0000-0000-0000-00000000a005',
+                           '00000000-0000-0000-0000-00000000ff02');
+  first := public.redeem_code(g.redemption_code, '00000000-0000-0000-0000-00000000e001',
+                              true, 'op-key-1');
+  again := public.redeem_code(g.redemption_code, '00000000-0000-0000-0000-00000000e001',
+                              true, 'op-key-1');
+
+  raise notice '% - F10: replaying an operation key returns the original receipt',
+    case when (again->>'ok')::boolean and (again->>'replayed')::boolean
+              and again->>'operation_id' = first->>'operation_id'
+         then 'PASS' else 'FAIL' end;
+
+  mismatch := public.redeem_code('SOMEOTHER', '00000000-0000-0000-0000-00000000e001',
+                                 true, 'op-key-1');
+  raise notice '% - F10: the same key with a different request is rejected (%)',
+    case when mismatch->>'reason' = 'operation_key_reused' then 'PASS' else 'FAIL' end,
+    mismatch->>'reason';
+end $$;
+
+-- F20: a night that runs past midnight is one visit, not two.
+select pg_temp.report('F20: 20:00 and 00:30 the same night share a business date',
+  public.venue_business_date('00000000-0000-0000-0000-00000000e001',
+    '2026-09-04 20:00:00 America/Chicago'::timestamptz)
+  = public.venue_business_date('00000000-0000-0000-0000-00000000e001',
+    '2026-09-05 00:30:00 America/Chicago'::timestamptz));
+
+select pg_temp.report('F20: the following evening is a different business date',
+  public.venue_business_date('00000000-0000-0000-0000-00000000e001',
+    '2026-09-04 20:00:00 America/Chicago'::timestamptz)
+  <> public.venue_business_date('00000000-0000-0000-0000-00000000e001',
+    '2026-09-05 20:00:00 America/Chicago'::timestamptz));
+
+select pg_temp.report('F20: the business date is venue-local, not UTC',
+  public.venue_business_date('00000000-0000-0000-0000-00000000e001',
+    '2026-09-05 01:00:00+00'::timestamptz) = date '2026-09-04');
+
+-- F08: a fan must not be able to mark themselves as having attended an event.
+insert into public.events (id, venue_id, title, starts_at, is_published)
+values ('00000000-0000-0000-0000-00000000ee01', '00000000-0000-0000-0000-00000000e001',
+        'Open Mic', now() + interval '1 day', true);
+
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-00000000a001","role":"authenticated"}';
+
+insert into public.event_rsvps (event_id, user_id, attended_at, attended_scanned_by)
+values ('00000000-0000-0000-0000-00000000ee01', '00000000-0000-0000-0000-00000000a001',
+        now(), '00000000-0000-0000-0000-00000000a001');
+
+select pg_temp.report('F08: a fan cannot mark their own event attendance',
+  (select attended_at is null and attended_scanned_by is null
+   from public.event_rsvps
+   where event_id = '00000000-0000-0000-0000-00000000ee01'
+     and user_id = '00000000-0000-0000-0000-00000000a001'));
+
 reset role;
 rollback;

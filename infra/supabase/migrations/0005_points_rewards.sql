@@ -40,11 +40,22 @@ create table if not exists public.point_transactions (
 
 create index if not exists point_tx_user_idx on public.point_transactions (user_id, created_at desc);
 
--- Idempotency. An award call that is retried after a timeout must not credit
--- twice, so the same rule against the same source can only ever land once.
+-- Idempotency. An award call retried after a timeout must not credit twice.
+--
+-- rule_code is nullable (a spend or a manual adjustment has no rule), and an
+-- ordinary unique index treats NULLs as distinct — so two identical null-rule
+-- rows would both be accepted and the key would silently do nothing. coalesce
+-- gives every row a concrete value to collide on.
 create unique index if not exists point_tx_idempotent
-  on public.point_transactions (source_type, source_id, rule_code)
+  on public.point_transactions (source_type, source_id, coalesce(rule_code, '-'))
   where source_id is not null;
+
+-- Every ledger row must be attributable to something. Without this, a caller
+-- can sidestep the key above simply by omitting source_id.
+alter table public.point_transactions
+  drop constraint if exists point_tx_needs_source;
+alter table public.point_transactions
+  add constraint point_tx_needs_source check (source_id is not null);
 
 create or replace function public.points_balance(target uuid)
 returns integer
@@ -143,6 +154,20 @@ create unique index if not exists reward_catalog_one_welcome
   on public.reward_catalog ((true)) where is_welcome_offer and is_active;
 
 -- ---------------------------------------------------------------------------
+-- Where a reward may be redeemed.
+--
+-- Recording the venue after the fact does not restrict anything: without this,
+-- any active staff member at any venue can redeem any grant, so a Houston
+-- benefit funded by the label is spendable at a Dallas partner who never
+-- agreed to fund it. No rows for a reward means "the venues listed below",
+-- which for the pilot is the owned Houston venue only.
+create table if not exists public.reward_venues (
+  reward_id uuid not null references public.reward_catalog(id) on delete cascade,
+  venue_id  uuid not null references public.venues(id) on delete cascade,
+  primary key (reward_id, venue_id)
+);
+
+-- ---------------------------------------------------------------------------
 create table if not exists public.reward_grants (
   id                   uuid primary key default gen_random_uuid(),
   user_id              uuid not null references public.profiles(id) on delete cascade,
@@ -150,6 +175,16 @@ create table if not exists public.reward_grants (
   redemption_code      text not null unique,
   granted_at           timestamptz not null default now(),
   expires_at           timestamptz not null,
+
+  -- Terms are copied from the catalogue at issuance and read from here at
+  -- redemption. A grant is a promise already made: editing the catalogue must
+  -- change what is issued next, never what was already handed to a fan.
+  terms_reward_name        text    not null,
+  terms_requires_purchase  boolean not null,
+  terms_blackout_rule_id   uuid    references public.blackout_rules(id) on delete set null,
+  terms_max_per_visit      integer not null default 1,
+  terms_unit_cost_cents    integer not null default 0,
+  terms_menu_value_cents   integer not null default 0,
   redeemed_at          timestamptz,
   redeemed_venue_id    uuid references public.venues(id) on delete set null,
   redeemed_by_staff_id uuid references public.profiles(id) on delete set null,

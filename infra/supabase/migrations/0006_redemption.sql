@@ -5,6 +5,24 @@
 -- fixed search_path; the client supplies a code and nothing else.
 
 -- ---------------------------------------------------------------------------
+-- Operation receipts.
+--
+-- A committed redemption whose response never arrived is indistinguishable, to
+-- the staff member holding the phone, from one somebody else already took.
+-- Storing the result under a caller-supplied key makes a retry return the
+-- original receipt instead of a bare refusal.
+create table if not exists public.redemption_operations (
+  id                  uuid primary key default gen_random_uuid(),
+  staff_id            uuid not null references public.profiles(id) on delete cascade,
+  operation_key       text not null,
+  request_fingerprint text not null,
+  grant_id            uuid references public.reward_grants(id) on delete set null,
+  result              jsonb not null,
+  created_at          timestamptz not null default now(),
+  unique (staff_id, operation_key)
+);
+
+-- ---------------------------------------------------------------------------
 -- Codes are short enough to read aloud across a loud room, and use the same
 -- unambiguous alphabet as referral codes.
 create or replace function public.generate_redemption_code()
@@ -79,12 +97,22 @@ begin
     end if;
   end if;
 
-  insert into public.reward_grants (user_id, reward_id, redemption_code, expires_at)
+  insert into public.reward_grants (
+    user_id, reward_id, redemption_code, expires_at,
+    terms_reward_name, terms_requires_purchase, terms_blackout_rule_id,
+    terms_max_per_visit, terms_unit_cost_cents, terms_menu_value_cents
+  )
   values (
     target_user,
     target_reward,
     public.generate_redemption_code(),
-    now() + make_interval(days => reward.validity_days)
+    now() + make_interval(days => reward.validity_days),
+    reward.name,
+    reward.requires_purchase,
+    reward.blackout_rule_id,
+    reward.max_per_user_per_visit,
+    reward.unit_cost_cents,
+    reward.menu_value_cents
   )
   returning * into grant_row;
 
@@ -97,7 +125,8 @@ end $$;
 create or replace function public.redeem_code(
   code            text,
   at_venue        uuid,
-  purchase_made   boolean default false
+  purchase_made   boolean default false,
+  operation_key   text default null
 )
 returns jsonb
 language plpgsql
@@ -105,15 +134,38 @@ security definer
 set search_path = public
 as $$
 declare
-  staff_id     uuid := auth.uid();
-  grant_row    public.reward_grants;
-  reward       public.reward_catalog;
-  redeemed_id  uuid;
-  today_count  integer;
-  ref          public.referrals;
+  staff_id      uuid := auth.uid();
+  grant_row     public.reward_grants;
+  is_welcome    boolean;
+  redeemed_id   uuid;
+  today_count   integer;
+  business_date date;
+  prior         public.redemption_operations;
+  ref           public.referrals;
+  result        jsonb;
 begin
   if staff_id is null then
     return jsonb_build_object('ok', false, 'reason', 'not_authenticated');
+  end if;
+
+  -- A redemption can commit and the response can still be lost on the way back
+  -- to a phone in a basement. Replaying the same operation key returns the
+  -- original receipt, so staff can tell "I already did this" apart from
+  -- "somebody else got here first" — which a bare already_redeemed cannot.
+  if operation_key is not null then
+    -- Both sides qualified: the local variable staff_id and the column of the
+    -- same name would otherwise be ambiguous.
+    select * into prior from public.redemption_operations o
+      where o.staff_id = auth.uid()
+        and o.operation_key = redeem_code.operation_key;
+
+    if found then
+      if prior.request_fingerprint is distinct from
+         md5(upper(trim(code)) || ':' || at_venue::text) then
+        return jsonb_build_object('ok', false, 'reason', 'operation_key_reused');
+      end if;
+      return prior.result || jsonb_build_object('replayed', true);
+    end if;
   end if;
 
   -- Staff must be active at THIS venue. A Dallas partner's staff must not be
@@ -157,23 +209,45 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'user_banned');
   end if;
 
-  select * into reward from public.reward_catalog where id = grant_row.reward_id;
+  -- Where the reward may be spent. Listing no venues means "anywhere active",
+  -- which is only safe once a funder has been agreed for every venue.
+  if exists (select 1 from public.reward_venues where reward_id = grant_row.reward_id)
+     and not exists (
+       select 1 from public.reward_venues
+       where reward_id = grant_row.reward_id and venue_id = at_venue
+     ) then
+    return jsonb_build_object('ok', false, 'reason', 'not_valid_at_this_venue');
+  end if;
 
-  if public.in_blackout(reward.blackout_rule_id, at_venue, now()) then
+  -- Terms come from the grant, not the catalogue: an admin editing a reward
+  -- must not silently change what an outstanding promise means.
+  if public.in_blackout(grant_row.terms_blackout_rule_id, at_venue, now()) then
     return jsonb_build_object('ok', false, 'reason', 'blackout_window');
   end if;
 
-  if reward.requires_purchase and not purchase_made then
+  if grant_row.terms_requires_purchase and not purchase_made then
     return jsonb_build_object('ok', false, 'reason', 'purchase_required');
   end if;
+
+  business_date := public.venue_business_date(at_venue, now());
+
+  -- Locking this grant does not lock a DIFFERENT grant belonging to the same
+  -- fan, so two codes scanned at once would both count zero prior redemptions
+  -- and both pass the per-visit limit. This advisory lock is held for the rest
+  -- of the transaction and is keyed on the visit, not the grant, so every
+  -- redemption for one person at one venue on one business day serialises here.
+  perform pg_advisory_xact_lock(
+    hashtextextended(grant_row.user_id::text || ':' || at_venue::text || ':' || business_date::text, 0)
+  );
 
   select count(*) into today_count
   from public.reward_grants g
   where g.user_id = grant_row.user_id
     and g.redeemed_venue_id = at_venue
-    and g.redeemed_at::date = (now() at time zone 'UTC')::date;
+    and g.redeemed_at is not null
+    and public.venue_business_date(at_venue, g.redeemed_at) = business_date;
 
-  if today_count >= reward.max_per_user_per_visit then
+  if today_count >= grant_row.terms_max_per_visit then
     return jsonb_build_object('ok', false, 'reason', 'visit_limit_reached');
   end if;
 
@@ -195,15 +269,21 @@ begin
 
   -- Record the visit and award the check-in points, ignoring a second check-in
   -- on the same day.
-  insert into public.venue_visits (user_id, venue_id, staff_id)
-  values (grant_row.user_id, at_venue, staff_id)
+  insert into public.venue_visits (user_id, venue_id, staff_id, visit_date)
+  values (grant_row.user_id, at_venue, staff_id, business_date)
   on conflict do nothing;
 
   perform public.award_points(grant_row.user_id, 'venue_checkin', 'checkin',
-                              grant_row.user_id::text || ':' || (now() at time zone 'UTC')::date::text);
+                              grant_row.user_id::text || ':' || at_venue::text
+                              || ':' || business_date::text);
 
-  -- A redeemed welcome offer is what confirms a referral.
-  if reward.is_welcome_offer then
+  -- A redeemed welcome offer is what confirms a referral. This one flag is read
+  -- live rather than bound, because it identifies which reward the campaign
+  -- treats as its welcome offer rather than forming part of the fan's promise.
+  select is_welcome_offer into is_welcome
+    from public.reward_catalog where id = grant_row.reward_id;
+
+  if coalesce(is_welcome, false) then
     select * into ref from public.referrals
       where referred_user_id = grant_row.user_id and status = 'pending'
       for update;
@@ -231,12 +311,26 @@ begin
     end if;
   end if;
 
-  return jsonb_build_object(
+  result := jsonb_build_object(
     'ok', true,
-    'reward_name', reward.name,
-    'requires_purchase', reward.requires_purchase,
+    'operation_id', gen_random_uuid(),
+    'reward_name', grant_row.terms_reward_name,
+    'requires_purchase', grant_row.terms_requires_purchase,
+    'venue_id', at_venue,
+    'staff_id', staff_id,
+    'redeemed_at', now(),
     'user_id', grant_row.user_id
   );
+
+  if operation_key is not null then
+    insert into public.redemption_operations
+      (staff_id, operation_key, request_fingerprint, grant_id, result)
+    values (staff_id, operation_key,
+            md5(upper(trim(code)) || ':' || at_venue::text),
+            grant_row.id, result);
+  end if;
+
+  return result;
 end $$;
 
 -- ---------------------------------------------------------------------------
@@ -263,9 +357,11 @@ begin
     return;                          -- rule disabled; not an error
   end if;
 
+  -- The conflict target must match point_tx_idempotent exactly, coalesce
+  -- included: a null rule_code would otherwise never collide.
   insert into public.point_transactions (user_id, rule_code, points, source_type, source_id)
   values (target_user, rule, rule_points, src_type, src_id)
-  on conflict (source_type, source_id, rule_code) where source_id is not null
+  on conflict (source_type, source_id, coalesce(rule_code, '-')) where source_id is not null
   do nothing;
 end $$;
 

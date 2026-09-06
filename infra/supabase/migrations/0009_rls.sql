@@ -78,6 +78,8 @@ alter table public.point_transactions    enable row level security;
 alter table public.blackout_rules        enable row level security;
 alter table public.reward_catalog        enable row level security;
 alter table public.reward_grants         enable row level security;
+alter table public.reward_venues         enable row level security;
+alter table public.redemption_operations enable row level security;
 alter table public.referrals             enable row level security;
 alter table public.businesses            enable row level security;
 alter table public.offers                enable row level security;
@@ -298,6 +300,18 @@ drop policy if exists reward_grants_admin on public.reward_grants;
 create policy reward_grants_admin on public.reward_grants for all
   using (public.is_admin()) with check (public.is_admin());
 
+drop policy if exists reward_venues_read on public.reward_venues;
+create policy reward_venues_read on public.reward_venues for select using (true);
+drop policy if exists reward_venues_admin on public.reward_venues;
+create policy reward_venues_admin on public.reward_venues for all
+  using (public.is_admin()) with check (public.is_admin());
+
+-- Written only by redeem_code. A staff member may read back their own receipts
+-- to resolve an uncertain scan, and nothing else.
+drop policy if exists redemption_ops_own on public.redemption_operations;
+create policy redemption_ops_own on public.redemption_operations
+  for select using (staff_id = auth.uid() or public.is_admin());
+
 -- ---------------------------------------------------------------------------
 -- Referrals: both sides can see their own; nobody but an admin writes.
 -- Status is set by redeem_code alone.
@@ -353,10 +367,40 @@ drop policy if exists event_artists_admin on public.event_artists;
 create policy event_artists_admin on public.event_artists for all
   using (public.is_admin()) with check (public.is_admin());
 
+-- A fan owns their RSVP *intent* only. attended_at feeds a points award, so a
+-- row-level "it's your row" check is not enough: without this the fan simply
+-- includes attended_at in the insert and pays themselves for a show they never
+-- came to. RLS has no column granularity, so the trigger below strips it.
 drop policy if exists event_rsvps_own on public.event_rsvps;
 create policy event_rsvps_own on public.event_rsvps
   for all using (user_id = auth.uid() or public.is_admin())
   with check (user_id = auth.uid() and public.is_active_user());
+
+create or replace function public.guard_rsvp_attendance()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_staff() then
+    return new;                       -- staff scan people in at the door
+  end if;
+
+  if tg_op = 'INSERT' then
+    new.attended_at := null;
+    new.attended_scanned_by := null;
+  else
+    new.attended_at := old.attended_at;
+    new.attended_scanned_by := old.attended_scanned_by;
+  end if;
+
+  return new;
+end $$;
+
+drop trigger if exists event_rsvps_guard on public.event_rsvps;
+create trigger event_rsvps_guard before insert or update on public.event_rsvps
+  for each row execute function public.guard_rsvp_attendance();
 
 -- ---------------------------------------------------------------------------
 -- Notifications, audit, abuse: admin only. A user must not be able to read the
@@ -404,9 +448,11 @@ revoke all on function public.handle_new_user()
   from public, anon, authenticated;
 revoke all on function public.write_audit()
   from public, anon, authenticated;
+revoke all on function public.guard_rsvp_attendance()
+  from public, anon, authenticated;
 
 -- Only these three are client-callable, and each validates the caller itself.
-grant execute on function public.redeem_code(text, uuid, boolean) to authenticated;
+grant execute on function public.redeem_code(text, uuid, boolean, text) to authenticated;
 grant execute on function public.spend_points(uuid)               to authenticated;
 grant execute on function public.points_balance(uuid)             to authenticated;
 
