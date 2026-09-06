@@ -4,8 +4,11 @@ Mobile app + admin dashboard for a hip-hop label. Fans discover the roster and
 tap out to Spotify / YouTube / Apple Music; the label controls every piece of
 content from the dashboard.
 
-**Phase 1 (this branch): foundation + discovery.** Auth, referrals, rewards,
-offers, events and notifications are later phases.
+**Status.** The backend is built and tested: schema, RLS, the points ledger,
+rewards, redemption, referrals, offers, events, notifications, audit and the
+abuse queue. The admin dashboard and mobile app currently target the earlier
+Phase 1 schema and are being brought onto this one — see `docs/BUILD-SPEC.md`
+for the full plan.
 
 ## Two rules the code is built around
 
@@ -53,13 +56,21 @@ npm install && npx expo start
 ```bash
 cd mobile  && npm run typecheck && npm test     # deep-link URL derivation
 cd admin   && npm run typecheck && npm run build
-cd infra/supabase && ./scripts/psql.sh -f tests/rls_check.sql
-                     ./scripts/psql.sh -f tests/schema_check.sql
+cd infra/supabase && ./scripts/test.sh          # 57 database assertions
 ```
 
-The two SQL test files are the evidence for the access-control and data-integrity
-items on the pre-launch checklist. They impersonate a real user at the database
-level, because the UI hiding something is not the same as the database refusing it.
+`scripts/test.sh` runs three suites and is the evidence for the access-control
+and economic items on the pre-launch checklist:
+
+| Suite | Covers |
+|---|---|
+| `tests/01_access_control.sql` | Privilege escalation, cross-user reads, artist data isolation, ledger and audit immutability |
+| `tests/02_rewards_referrals.sql` | Redemption refusals, expiry, voiding, blackout windows across timezones, issue caps, referral integrity |
+| `tests/03_concurrency.sh` | Two real sessions racing one redemption code, and a double-spend against the derived points balance |
+
+They impersonate real roles at the database level with `SET LOCAL role` and
+`request.jwt.claims`, exactly as PostgREST does for a signed-in client. A UI that
+hides a control is not evidence that the database refuses it.
 
 ## Brand
 
