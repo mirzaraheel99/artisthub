@@ -11,8 +11,16 @@ create table if not exists public.businesses (
   contact_email text,
   contact_phone text,
   tier          text not null default 'basic' check (tier in ('basic','featured','sponsor')),
+  -- Where the post-redemption prompt sends people. Google only: Google permits
+  -- asking customers for reviews, Yelp prohibits soliciting them at all.
+  google_review_url text,
   is_active     boolean not null default true,
-  created_at    timestamptz not null default now()
+  created_at    timestamptz not null default now(),
+
+  constraint businesses_review_url_is_google check (
+    google_review_url is null
+    or google_review_url ~* '^https://(g\.page|search\.google\.com|www\.google\.com|maps\.app\.goo\.gl)/'
+  )
 );
 
 create index if not exists businesses_city_idx on public.businesses (city_id) where is_active;
@@ -92,6 +100,57 @@ end $$;
 drop trigger if exists offer_redemptions_limits on public.offer_redemptions;
 create trigger offer_redemptions_limits before insert on public.offer_redemptions
   for each row execute function public.enforce_offer_limits();
+
+-- ---------------------------------------------------------------------------
+-- Post-redemption review prompts.
+--
+-- The reward is earned for referring; the review request comes afterwards with
+-- nothing attached to it. That separation is what keeps this permitted — an
+-- incentive tied to the review itself would not be.
+--
+-- Two rules this table exists to enforce:
+--
+--   1. No sentiment gating. Every redeemer gets the same prompt. There is
+--      deliberately no column for how the visit went, and none for whether a
+--      review was left or what it said: filtering who gets asked by how happy
+--      they are is exactly what Google prohibits, and data we do not hold
+--      cannot be used that way later.
+--   2. A frequency cap, so a regular is not asked every single visit.
+create table if not exists public.review_prompts (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  business_id  uuid references public.businesses(id) on delete cascade,
+  venue_id     uuid references public.venues(id) on delete cascade,
+  prompted_at  timestamptz not null default now(),
+  dismissed_at timestamptz,
+  opened_at    timestamptz,
+
+  constraint review_prompts_has_target
+    check (business_id is not null or venue_id is not null)
+);
+
+create index if not exists review_prompts_user_idx
+  on public.review_prompts (user_id, prompted_at desc);
+
+-- Whether a person is due another prompt. Default cooldown is 90 days; a
+-- regular who comes in weekly should not be asked weekly.
+create or replace function public.review_prompt_due(
+  target_user     uuid,
+  target_business uuid default null,
+  target_venue    uuid default null,
+  cooldown_days   integer default 90
+)
+returns boolean
+language sql stable
+as $$
+  select not exists (
+    select 1 from public.review_prompts
+    where user_id = target_user
+      and (target_business is null or business_id = target_business)
+      and (target_venue    is null or venue_id    = target_venue)
+      and prompted_at > now() - make_interval(days => cooldown_days)
+  );
+$$;
 
 -- ---------------------------------------------------------------------------
 create table if not exists public.events (

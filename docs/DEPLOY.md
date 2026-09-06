@@ -1,4 +1,4 @@
-# Deploying to the Hetzner server
+# Deploying to the Azure server
 
 Self-hosting Supabase is free — the software is open source and you pay only for
 the box. What you take on in exchange is operations: backups, upgrades, TLS and
@@ -68,6 +68,12 @@ EOF
 systemctl reload caddy
 ```
 
+If the box already runs nginx or Apache, add a server block for the subdomain
+that proxies to `127.0.0.1:8000` instead of installing Caddy — two things
+competing for port 443 is exactly the collision this whole page avoids. If a
+control panel (Plesk, cPanel, CyberPanel) manages the web server, add the
+subdomain through the panel: hand-edited config gets overwritten.
+
 Then set `API_EXTERNAL_URL` and `SUPABASE_PUBLIC_URL` in `.env` to
 `https://api.yourdomain.com`, restart the stack, and point both apps at that URL.
 
@@ -91,10 +97,21 @@ crontab -e
 0 4 * * * /srv/artisthub/infra/supabase/scripts/backup.sh >> /var/log/ah-backup.log 2>&1
 ```
 
-`backup.sh` keeps 14 days locally. Local copies do not survive the server dying,
-so ship them off-box — Hetzner Object Storage or a Storage Box, via rclone or
-`s3cmd`. **Restore one into a scratch database and confirm it works.** An
-untested backup is not a backup.
+`backup.sh` keeps 14 days locally. Local copies do not survive the VM dying, so
+ship them off-box — Azure Blob Storage via `az storage blob upload` or rclone.
+
+Two things a database dump does **not** cover, and both matter:
+
+- **Storage file bytes.** Artist photos, cover art and Vault media live in a
+  Docker volume, not in Postgres. Back that volume up separately or a restore
+  brings back a catalogue full of broken images.
+- **Recent redemptions.** A nightly dump means a restore can lose a day of
+  redemptions, which makes already-served rewards look unused and redeemable
+  again. After any restore, **keep redemptions paused until the day's
+  redemption records have been reconciled against the till.**
+
+**Restore one into a scratch database and confirm it works.** An untested backup
+is not a backup.
 
 ## 6. Updating
 
@@ -111,6 +128,9 @@ Take a backup before any upgrade that moves the Postgres major version.
 - [ ] Domain resolves and https works, with no bare-IP URL left in any config
 - [ ] `SERVICE_ROLE_KEY` exists only in the server's `.env`
 - [ ] `ENABLE_EMAIL_AUTOCONFIRM=false`, SMTP configured, signup email confirmed arriving
-- [ ] Firewall allows only SSH and 443; ports 5432 and 8000 are not reachable from outside
+- [ ] `preflight.sh` reports zero blockers, and every warning has been read
+- [ ] `COMPOSE_PROJECT_NAME` is set, so no container name collides with an existing one
+- [ ] Azure NSG and any host firewall allow only 22 and 443; 5432 and 8000 are not reachable from outside
+- [ ] The applications already on this box are still healthy after installation
 - [ ] Backups running on cron, shipped off-box, and one restore actually tested
 - [ ] `tests/rls_check.sql` and `tests/schema_check.sql` both all-PASS against production

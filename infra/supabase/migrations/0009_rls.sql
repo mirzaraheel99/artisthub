@@ -84,6 +84,7 @@ alter table public.referrals             enable row level security;
 alter table public.businesses            enable row level security;
 alter table public.offers                enable row level security;
 alter table public.offer_redemptions     enable row level security;
+alter table public.review_prompts        enable row level security;
 alter table public.events                enable row level security;
 alter table public.event_artists         enable row level security;
 alter table public.event_rsvps           enable row level security;
@@ -353,6 +354,12 @@ create policy offer_redemptions_insert on public.offer_redemptions
 drop policy if exists offer_redemptions_admin on public.offer_redemptions;
 create policy offer_redemptions_admin on public.offer_redemptions for all
   using (public.is_admin()) with check (public.is_admin());
+
+-- A person sees and dismisses their own prompts, nothing else.
+drop policy if exists review_prompts_own on public.review_prompts;
+create policy review_prompts_own on public.review_prompts
+  for all using (user_id = auth.uid() or public.is_admin())
+  with check (user_id = auth.uid());
 
 drop policy if exists events_read on public.events;
 create policy events_read on public.events
