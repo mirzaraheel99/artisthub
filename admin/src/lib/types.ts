@@ -194,12 +194,49 @@ export type Venue = {
   created_at: string;
 };
 
-type Table<Row, Insert = Partial<Row>, Update = Partial<Row>> = {
+/** What redeem_code returns. `ok: false` always carries a reason the staff
+ *  screen can render as a specific sentence rather than a generic failure. */
+export type RedeemResult =
+  | {
+      ok: true;
+      operation_id: string;
+      reward_name: string;
+      requires_purchase: boolean;
+      venue_id: string;
+      staff_id: string;
+      redeemed_at: string;
+      user_id: string;
+      replayed?: boolean;
+    }
+  | { ok: false; reason: string; redeemed_at?: string; expired_at?: string };
+
+type Relationship = {
+  foreignKeyName: string;
+  columns: string[];
+  isOneToOne: boolean;
+  referencedRelation: string;
+  referencedColumns: string[];
+};
+
+type Table<Row, Insert = Partial<Row>, Update = Partial<Row>, Rels extends Relationship[] = []> = {
   Row: Row;
   Insert: Insert;
   Update: Update;
-  Relationships: [];
+  Relationships: Rels;
 };
+
+/** Declared so embedded selects like `tracks(*, links:track_links(*))` resolve.
+ *  A relationship belongs to the table holding the foreign key; the reverse
+ *  embed is derived from it. */
+type BelongsTo<Name extends string, Col extends string, Ref extends string> = [
+  {
+    foreignKeyName: Name;
+    columns: [Col];
+    isOneToOne: false;
+    referencedRelation: Ref;
+    referencedColumns: ['id'];
+  },
+];
 
 export type Database = {
   public: {
@@ -211,9 +248,24 @@ export type Database = {
       user_roles: Table<UserRole, { user_id: string; role_code: RoleCode }>;
       artists: Table<Artist, Partial<Artist> & { name: string; slug: string; install_code: string }>;
       artist_links: Table<ArtistLink, { artist_id: string; platform_code: string; url: string }>;
-      artist_socials: Table<ArtistSocial, { artist_id: string; platform_code: string; url: string }>;
-      tracks: Table<Track, Partial<Track> & { artist_id: string; title: string }>;
-      track_links: Table<TrackLink, { track_id: string; platform_code: string; url: string }>;
+      artist_socials: Table<
+        ArtistSocial,
+        { artist_id: string; platform_code: string; url: string },
+        Partial<ArtistSocial>,
+        BelongsTo<'artist_socials_artist_id_fkey', 'artist_id', 'artists'>
+      >;
+      tracks: Table<
+        Track,
+        Partial<Track> & { artist_id: string; title: string },
+        Partial<Track>,
+        BelongsTo<'tracks_artist_id_fkey', 'artist_id', 'artists'>
+      >;
+      track_links: Table<
+        TrackLink,
+        { track_id: string; platform_code: string; url: string },
+        Partial<TrackLink>,
+        BelongsTo<'track_links_track_id_fkey', 'track_id', 'tracks'>
+      >;
       link_clicks: Table<LinkClick>;
       point_rules: Table<PointRule>;
       blackout_rules: Table<BlackoutRule>;
@@ -222,13 +274,62 @@ export type Database = {
         { reward_id: string; venue_id: string },
         { reward_id: string; venue_id: string }
       >;
+      venue_staff: Table<
+        {
+          id: string;
+          venue_id: string;
+          user_id: string;
+          granted_at: string;
+          revoked_at: string | null;
+        },
+        { venue_id: string; user_id: string },
+        Partial<{ revoked_at: string | null }>,
+        BelongsTo<'venue_staff_venue_id_fkey', 'venue_id', 'venues'>
+      >;
+      review_prompts: Table<
+        {
+          id: string;
+          user_id: string;
+          business_id: string | null;
+          venue_id: string | null;
+          prompted_at: string;
+          dismissed_at: string | null;
+          opened_at: string | null;
+        },
+        { user_id: string; business_id?: string | null; venue_id?: string | null }
+      >;
       reward_grants: Table<RewardGrant>;
       referrals: Table<Referral>;
       venues: Table<Venue>;
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      points_balance: { Args: { target: string }; Returns: number };
+      redeem_code: {
+        Args: {
+          code: string;
+          at_venue: string;
+          purchase_made?: boolean;
+          operation_key?: string;
+        };
+        Returns: RedeemResult;
+      };
+      spend_points: { Args: { target_reward: string }; Returns: unknown };
+      review_prompt_due: {
+        Args: {
+          target_user: string;
+          target_business?: string | null;
+          target_venue?: string | null;
+          cooldown_days?: number;
+        };
+        Returns: boolean;
+      };
+    };
     Enums: { user_role: RoleCode };
     CompositeTypes: Record<string, never>;
   };
 };
+
+// NOTE: this file is the canonical schema definition and is copied verbatim to
+// admin/src/lib/types.ts. Edit it here, then copy — editing the admin copy
+// alone will be silently overwritten on the next sync.

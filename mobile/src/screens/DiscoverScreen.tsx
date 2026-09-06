@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { CompositeScreenProps } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import {
   fetchArtists,
@@ -20,13 +22,18 @@ import {
   type Release,
 } from '../api/content';
 import type { Artist } from '../lib/types';
-import type { RootStackParamList } from '../navigation';
+import type { RootStackParamList, TabParamList } from '../navigation';
 import { colors, radius, spacing, type } from '../theme';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { PressableScale } from '../components/PressableScale';
 import { Grain } from '../components/Grain';
 
-type Props = NativeStackScreenProps<RootStackParamList, 'Discover'>;
+// Discover lives in the tab navigator but pushes onto the stack above it, so
+// its navigation prop has to describe both.
+type Props = CompositeScreenProps<
+  BottomTabScreenProps<TabParamList, 'Discover'>,
+  NativeStackScreenProps<RootStackParamList>
+>;
 
 const GRID_GAP = spacing.md;
 const CARD_WIDTH = (Dimensions.get('window').width - spacing.md * 2 - GRID_GAP) / 2;
