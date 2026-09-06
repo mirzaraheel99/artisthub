@@ -44,6 +44,12 @@ test('apple: the protocol is swapped and the path preserved', () => {
   );
 });
 
+test('an unknown platform code always falls back to https', () => {
+  // A platform added as a database row ships no native scheme until a build
+  // supports it. Falling back is correct, not a failure.
+  assert.equal(nativeUrlFor('https://tidal.com/track/123', 'tidal'), null);
+});
+
 test('a host that is not the expected platform is rejected', () => {
   // Guards against an admin pasting the wrong platform's URL into a field and
   // the app then generating a native URL that opens the wrong app.

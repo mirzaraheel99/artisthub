@@ -1,8 +1,6 @@
-import type { LinkPlatform } from './types';
-
 /**
- * Pure URL derivation, kept free of any React Native or Expo import so it can
- * be unit-tested in plain Node. streaming.ts wraps this with the side effects.
+ * Pure URL derivation, free of any React Native or Expo import so it can be
+ * unit-tested in plain Node. streaming.ts wraps this with the side effects.
  *
  * Rewrites a web URL into the platform's native scheme.
  *
@@ -13,9 +11,13 @@ import type { LinkPlatform } from './types';
  * "opens the real app, so the play counts there" path.
  *
  * Returns null when a native URL can't be derived confidently; the caller then
- * just opens the original https URL.
+ * opens the original https URL.
+ *
+ * Platform codes match public.link_platforms. A platform with no case here is
+ * not broken — it simply always uses its https URL, which is why a new
+ * platform can be added as a database row without shipping a build.
  */
-export function nativeUrlFor(webUrl: string, platform: LinkPlatform): string | null {
+export function nativeUrlFor(webUrl: string, platformCode: string): string | null {
   let parsed: URL;
   try {
     parsed = new URL(webUrl);
@@ -25,7 +27,7 @@ export function nativeUrlFor(webUrl: string, platform: LinkPlatform): string | n
 
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
 
-  switch (platform) {
+  switch (platformCode) {
     case 'spotify':
       return spotifyNativeUrl(parsed);
     case 'youtube':
@@ -56,14 +58,12 @@ function spotifyNativeUrl(parsed: URL): string | null {
 function youtubeNativeUrl(parsed: URL): string | null {
   const host = parsed.hostname.toLowerCase();
 
-  // Both youtu.be/ID and youtube.com/watch?v=ID collapse to a video id.
   let videoId: string | undefined;
   if (/(^|\.)youtu\.be$/.test(host)) {
     videoId = parsed.pathname.split('/').filter(Boolean)[0];
   } else if (/(^|\.)youtube\.com$/.test(host)) {
     videoId = parsed.searchParams.get('v') ?? undefined;
     if (!videoId) {
-      // /shorts/ID and /embed/ID also resolve to a plain video.
       const segments = parsed.pathname.split('/').filter(Boolean);
       if (segments[0] === 'shorts' || segments[0] === 'embed') videoId = segments[1];
     }

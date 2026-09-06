@@ -1,80 +1,76 @@
 import * as Linking from 'expo-linking';
 import * as Haptics from 'expo-haptics';
 import { supabase } from './supabase';
-import type { LinkPlatform, Track } from './types';
+import type { TrackLink } from './types';
 import { nativeUrlFor } from './deepLinkUrls';
 
 export { nativeUrlFor };
 
-export const PLATFORM_LABELS: Record<LinkPlatform, string> = {
-  spotify: 'Spotify',
-  youtube: 'YouTube',
-  apple: 'Apple Music',
+export type OpenResult = {
+  opened: boolean;
+  /** How it actually opened. This is what proves in production whether fans
+   *  reach the real app or fall back to a web player. */
+  openedVia: 'native' | 'web' | 'failed';
+  error?: string;
 };
 
-export function webUrlFor(track: Track, platform: LinkPlatform): string | null {
-  switch (platform) {
-    case 'spotify':
-      return track.spotify_url;
-    case 'youtube':
-      return track.youtube_url;
-    case 'apple':
-      return track.apple_music_url;
-  }
-}
-
-export function availablePlatforms(track: Track): LinkPlatform[] {
-  return (['spotify', 'youtube', 'apple'] as LinkPlatform[]).filter((p) => webUrlFor(track, p));
-}
-
 /**
- * Records the click, then opens the destination.
+ * Records the tap, then opens the destination.
  *
  * Tracking is fire-and-forget on purpose: a fan tapping "listen" must never
  * wait on, or be blocked by, an analytics write. If the network is down the
  * link still opens and we lose one data point.
+ *
+ * This records a routing attempt and its outcome — never a "stream" or a
+ * "play". We cannot observe whether anything was listened to, and no reward is
+ * ever attached to this action: incentivised streaming violates the platforms'
+ * terms and the penalty lands on the artist's account.
  */
 export async function openTrackLink(
-  track: Track,
-  platform: LinkPlatform,
+  link: TrackLink,
   userId: string | null,
-): Promise<{ opened: boolean; error?: string }> {
-  const webUrl = webUrlFor(track, platform);
-  if (!webUrl) return { opened: false, error: 'No link for this platform.' };
-
+  deviceId: string | null,
+): Promise<OpenResult> {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-  void recordLinkClick(track.id, platform, userId);
 
-  const nativeUrl = nativeUrlFor(webUrl, platform);
+  const nativeUrl = nativeUrlFor(link.url, link.platform_code);
 
   if (nativeUrl) {
     try {
       if (await Linking.canOpenURL(nativeUrl)) {
         await Linking.openURL(nativeUrl);
-        return { opened: true };
+        void recordClick(link, 'native', userId, deviceId);
+        return { opened: true, openedVia: 'native' };
       }
     } catch {
-      // canOpenURL throws on iOS when the scheme isn't declared in
+      // canOpenURL throws on iOS when the scheme is not declared in
       // LSApplicationQueriesSchemes (see app.json). Fall through to https.
     }
   }
 
   try {
-    await Linking.openURL(webUrl);
-    return { opened: true };
+    await Linking.openURL(link.url);
+    void recordClick(link, 'web', userId, deviceId);
+    return { opened: true, openedVia: 'web' };
   } catch {
-    return { opened: false, error: `Couldn't open ${PLATFORM_LABELS[platform]}.` };
+    void recordClick(link, 'failed', userId, deviceId);
+    return { opened: false, openedVia: 'failed', error: "Couldn't open that link." };
   }
 }
 
-export async function recordLinkClick(
-  trackId: string,
-  platform: LinkPlatform,
+async function recordClick(
+  link: TrackLink,
+  openedVia: 'native' | 'web' | 'failed',
   userId: string | null,
+  deviceId: string | null,
 ): Promise<void> {
-  const { error } = await supabase
-    .from('link_clicks')
-    .insert({ track_id: trackId, platform, user_id: userId });
+  const { error } = await supabase.from('link_clicks').insert({
+    track_link_id: link.id,
+    platform_code: link.platform_code,
+    opened_via: openedVia,
+    user_id: userId,
+    device_id: deviceId,
+  });
 
   if (error && __DEV__) {
     console.warn('[link_clicks] insert failed:', error.message);

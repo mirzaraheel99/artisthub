@@ -14,33 +14,32 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { fetchArtist, fetchTracksByArtist } from '../api/content';
-import type { Artist, SocialLinks, Track } from '../lib/types';
+import {
+  fetchArtist,
+  fetchArtistSocials,
+  fetchLinkPlatforms,
+  fetchTracksByArtist,
+  type TrackWithLinks,
+} from '../api/content';
+import type { Artist, ArtistSocial, LinkPlatform } from '../lib/types';
 import type { RootStackParamList } from '../navigation';
 import { colors, radius, spacing, type } from '../theme';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { ListenButtons } from '../components/ListenButtons';
 import { Grain } from '../components/Grain';
-import { useSession } from '../lib/session';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ArtistProfile'>;
 
 const HERO_HEIGHT = Math.min(Dimensions.get('window').height * 0.52, 480);
 
-const SOCIAL_ORDER: { key: keyof SocialLinks; label: string }[] = [
-  { key: 'instagram', label: 'Instagram' },
-  { key: 'tiktok', label: 'TikTok' },
-  { key: 'x', label: 'X' },
-  { key: 'youtube', label: 'YouTube' },
-];
-
 export function ArtistProfileScreen({ route, navigation }: Props) {
   const { artistId, artistName } = route.params;
   const insets = useSafeAreaInsets();
-  const { userId } = useSession();
 
   const [artist, setArtist] = useState<Artist | null>(null);
-  const [tracks, setTracks] = useState<Track[]>([]);
+  const [tracks, setTracks] = useState<TrackWithLinks[]>([]);
+  const [socials, setSocials] = useState<ArtistSocial[]>([]);
+  const [platforms, setPlatforms] = useState<LinkPlatform[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,12 +47,16 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [artistData, trackData] = await Promise.all([
+      const [artistData, trackData, socialData, platformData] = await Promise.all([
         fetchArtist(artistId),
         fetchTracksByArtist(artistId),
+        fetchArtistSocials(artistId),
+        fetchLinkPlatforms(),
       ]);
       setArtist(artistData);
       setTracks(trackData);
+      setSocials(socialData);
+      setPlatforms(platformData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error.');
     }
@@ -88,8 +91,8 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
     );
   }
 
-  const socials = SOCIAL_ORDER.filter((s) => artist.social_links?.[s.key]);
-  const spotifyArtistUrl = artist.social_links?.spotify;
+  const spotifyArtistUrl = socials.find((s) => s.platform_code === 'spotify')?.url;
+  const otherSocials = socials.filter((s) => s.platform_code !== 'spotify');
 
   return (
     <ScrollView
@@ -132,15 +135,15 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
           <Pressable style={styles.shareButton} onPress={() => void share()} accessibilityRole="button">
             <Text style={styles.shareLabel}>Share</Text>
           </Pressable>
-          {socials.map((social) => (
+          {otherSocials.map((social) => (
             <Pressable
-              key={String(social.key)}
+              key={social.id}
               style={styles.socialChip}
-              onPress={() => void Linking.openURL(artist.social_links[social.key]!)}
+              onPress={() => void Linking.openURL(social.url)}
               accessibilityRole="link"
-              accessibilityLabel={`${artist.name} on ${social.label}`}
+              accessibilityLabel={`${artist.name} on ${social.platform_code}`}
             >
-              <Text style={styles.socialLabel}>{social.label}</Text>
+              <Text style={styles.socialLabel}>{labelFor(social.platform_code)}</Text>
             </Pressable>
           ))}
         </View>
@@ -182,7 +185,11 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
                   <Text style={styles.trackDate}>{formatReleaseDate(track.release_date)}</Text>
                 ) : null}
                 <View style={{ marginTop: spacing.sm }}>
-                  <ListenButtons track={track} userId={userId} />
+                  <ListenButtons
+                    links={track.links}
+                    platforms={platforms}
+                    trackTitle={track.title}
+                  />
                 </View>
               </View>
             </View>
@@ -191,6 +198,10 @@ export function ArtistProfileScreen({ route, navigation }: Props) {
       </View>
     </ScrollView>
   );
+}
+
+function labelFor(code: string): string {
+  return code.charAt(0).toUpperCase() + code.slice(1);
 }
 
 function formatReleaseDate(value: string): string {

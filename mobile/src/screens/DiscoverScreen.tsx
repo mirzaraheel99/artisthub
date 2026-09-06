@@ -12,8 +12,14 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { fetchArtists, fetchFeatured, fetchNewReleases } from '../api/content';
-import type { Artist, Track } from '../lib/types';
+import {
+  fetchArtists,
+  fetchFeatured,
+  fetchNewReleases,
+  type Featured,
+  type Release,
+} from '../api/content';
+import type { Artist } from '../lib/types';
 import type { RootStackParamList } from '../navigation';
 import { colors, radius, spacing, type } from '../theme';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -21,9 +27,6 @@ import { PressableScale } from '../components/PressableScale';
 import { Grain } from '../components/Grain';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Discover'>;
-
-type Featured = Awaited<ReturnType<typeof fetchFeatured>>;
-type Release = Track & { artist: Pick<Artist, 'id' | 'name'> | null };
 
 const GRID_GAP = spacing.md;
 const CARD_WIDTH = (Dimensions.get('window').width - spacing.md * 2 - GRID_GAP) / 2;

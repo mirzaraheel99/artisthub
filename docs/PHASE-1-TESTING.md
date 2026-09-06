@@ -60,12 +60,16 @@ After the runs above:
 
 ```bash
 cd infra/supabase
-./scripts/psql.sh -c "select platform, count(*) from link_clicks group by 1 order by 2 desc;"
+./scripts/psql.sh -c \
+  "select platform_code, opened_via, count(*)
+     from link_clicks group by 1,2 order by 3 desc;"
 ```
 
 - [ ] Every tap in section 1 produced exactly one row
 - [ ] The platform matches what you tapped
-- [ ] `user_id` is null (Phase 1 has no signup yet — this is expected, not a bug)
+- [ ] **`opened_via` says `native` when the app was installed and `web` when it wasn't.** This is the column that proves the deep links are doing their job — a run that is all `web` means fans are landing on the web player and the native schemes are not working
+- [ ] `user_id` is null (there is no signup yet — expected, not a bug)
+- [ ] `device_id` is the same value across all taps from one phone, and differs between the two phones
 - [ ] The count in the dashboard's **Link clicks** tile matches this query
 
 The counts must match the raw records. If they don't, the reporting in Phase 5
@@ -92,11 +96,10 @@ Not "the UI hides it" — the database must refuse it.
 
 ```bash
 cd infra/supabase
-./scripts/psql.sh -f tests/rls_check.sql      # 9 assertions
-./scripts/psql.sh -f tests/schema_check.sql   # 8 assertions
+./scripts/test.sh        # 69 assertions across three suites
 ```
 
-- [ ] Every line prints PASS
+- [ ] Every line prints PASS, and the run ends with "All database tests passed"
 - [ ] Sign up a second account, do **not** promote it, open the dashboard →
       "Not an admin" screen, and no artist data is reachable
 
