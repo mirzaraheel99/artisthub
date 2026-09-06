@@ -1,16 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import type { Artist, SocialLinks } from '../lib/types';
-import { Button, Card, Field, Input, Textarea } from './ui';
+import { usePlatforms, validateAgainstPattern, slugify, generateInstallCode } from '../lib/platforms';
+import type { Artist } from '../lib/types';
+import { Button, Card, Field, Input, Spinner, Textarea } from './ui';
 import { ImageUpload } from './ImageUpload';
-
-const SOCIAL_FIELDS: { key: keyof SocialLinks; label: string; placeholder: string }[] = [
-  { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/…' },
-  { key: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@…' },
-  { key: 'x', label: 'X', placeholder: 'https://x.com/…' },
-  { key: 'spotify', label: 'Spotify artist page', placeholder: 'https://open.spotify.com/artist/…' },
-  { key: 'youtube', label: 'YouTube channel', placeholder: 'https://youtube.com/@…' },
-];
 
 export function ArtistForm({
   artist,
@@ -23,49 +16,108 @@ export function ArtistForm({
   onDone: () => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const { socialPlatforms, loading: platformsLoading } = usePlatforms();
+
   const [name, setName] = useState(artist?.name ?? '');
   const [bio, setBio] = useState(artist?.bio ?? '');
   const [photoUrl, setPhotoUrl] = useState<string | null>(artist?.photo_url ?? null);
   const [isFeatured, setIsFeatured] = useState(artist?.is_featured ?? false);
-  const [social, setSocial] = useState<SocialLinks>(artist?.social_links ?? {});
+  const [socials, setSocials] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Socials are rows, so they load separately from the artist record.
+  useEffect(() => {
+    if (!artist) return;
+    let cancelled = false;
+
+    void supabase
+      .from('artist_socials')
+      .select('platform_code, url')
+      .eq('artist_id', artist.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setSocials(Object.fromEntries(data.map((row) => [row.platform_code, row.url])));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artist]);
+
+  const socialErrors = socialPlatforms.reduce<Record<string, string>>((acc, platform) => {
+    const message = validateAgainstPattern(
+      socials[platform.code] ?? '',
+      platform.url_pattern,
+      platform.display_name,
+    );
+    if (message) acc[platform.code] = message;
+    return acc;
+  }, {});
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) {
-      setError('Name is required.');
-      return;
-    }
+    if (!name.trim()) return setError('Name is required.');
+    if (Object.keys(socialErrors).length > 0) return setError('Fix the social links before saving.');
 
     setBusy(true);
     setError(null);
-
-    // Drop empty social fields so the stored jsonb stays clean rather than
-    // filling with empty strings the app would then have to filter.
-    const cleanedSocial = Object.fromEntries(
-      Object.entries(social).filter(([, value]) => value && value.trim()),
-    ) as SocialLinks;
 
     const payload = {
       name: name.trim(),
       bio: bio.trim() || null,
       photo_url: photoUrl,
-      social_links: cleanedSocial,
       is_featured: isFeatured,
     };
 
-    const { error: err } = artist
-      ? await supabase.from('artists').update(payload).eq('id', artist.id)
-      : await supabase.from('artists').insert({ ...payload, sort_order: nextSortOrder });
+    let artistId = artist?.id;
 
-    if (err) {
-      setError(err.message);
-      setBusy(false);
-      return;
+    if (artist) {
+      const { error: err } = await supabase.from('artists').update(payload).eq('id', artist.id);
+      if (err) return fail(err.message);
+    } else {
+      const { data, error: err } = await supabase
+        .from('artists')
+        .insert({
+          ...payload,
+          slug: slugify(name),
+          // Each artist gets their own trackable install link. An artist with a
+          // following drives more installs than fan-to-fan referral does, and
+          // this is what shows which artists actually deliver.
+          install_code: generateInstallCode(),
+          sort_order: nextSortOrder,
+        })
+        .select('id')
+        .single();
+      if (err) return fail(err.message);
+      artistId = data.id;
     }
+
+    if (!artistId) return fail('The artist was saved but no id came back.');
+
+    // Replace the social rows wholesale: simpler and more predictable than
+    // diffing, and the set is tiny.
+    const rows = Object.entries(socials)
+      .filter(([, url]) => url.trim())
+      .map(([platform_code, url]) => ({ artist_id: artistId, platform_code, url: url.trim() }));
+
+    const { error: delErr } = await supabase.from('artist_socials').delete().eq('artist_id', artistId);
+    if (delErr) return fail(delErr.message);
+
+    if (rows.length > 0) {
+      const { error: insErr } = await supabase.from('artist_socials').insert(rows);
+      if (insErr) return fail(insErr.message);
+    }
+
     await onDone();
+
+    function fail(message: string) {
+      setError(message);
+      setBusy(false);
+    }
   };
+
+  if (platformsLoading) return <Spinner label="Loading platforms…" />;
 
   return (
     <div className="max-w-2xl">
@@ -98,17 +150,22 @@ export function ArtistForm({
             />
             Feature on the Home banner
           </label>
+
+          {artist ? (
+            <Field label="Install link" hint="Give this to the artist to post. Installs through it are attributed to them.">
+              <Input readOnly value={`https://YOUR-DOMAIN/a/${artist.install_code}`} />
+            </Field>
+          ) : null}
         </Card>
 
         <Card className="space-y-4">
           <p className="text-xs font-semibold uppercase tracking-wider text-ink-400">Social links</p>
-          {SOCIAL_FIELDS.map((field) => (
-            <Field key={String(field.key)} label={field.label}>
+          {socialPlatforms.map((platform) => (
+            <Field key={platform.code} label={platform.display_name} error={socialErrors[platform.code]}>
               <Input
                 type="url"
-                placeholder={field.placeholder}
-                value={social[field.key] ?? ''}
-                onChange={(e) => setSocial((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                value={socials[platform.code] ?? ''}
+                onChange={(e) => setSocials((prev) => ({ ...prev, [platform.code]: e.target.value }))}
               />
             </Field>
           ))}

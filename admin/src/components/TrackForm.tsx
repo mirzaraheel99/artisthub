@@ -1,11 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import type { LinkPlatform, Track } from '../lib/types';
-import { PLATFORM_LABELS, streamingPlaceholder, validateStreamingUrl } from '../lib/streamingUrls';
-import { Button, Card, Field, Input } from './ui';
+import { usePlatforms, validateAgainstPattern } from '../lib/platforms';
+import type { Track } from '../lib/types';
+import { Button, Card, Field, Input, Spinner } from './ui';
 import { ImageUpload } from './ImageUpload';
-
-const PLATFORMS: LinkPlatform[] = ['spotify', 'youtube', 'apple'];
 
 export function TrackForm({
   artistId,
@@ -18,34 +16,56 @@ export function TrackForm({
   onDone: () => void | Promise<void>;
   onCancel: () => void;
 }) {
+  const { linkPlatforms, loading: platformsLoading } = usePlatforms();
+
   const [title, setTitle] = useState(track?.title ?? '');
   const [coverArt, setCoverArt] = useState<string | null>(track?.cover_art_url ?? null);
   const [releaseDate, setReleaseDate] = useState(track?.release_date ?? '');
   const [isFeatured, setIsFeatured] = useState(track?.is_featured ?? false);
-  const [urls, setUrls] = useState<Record<LinkPlatform, string>>({
-    spotify: track?.spotify_url ?? '',
-    youtube: track?.youtube_url ?? '',
-    apple: track?.apple_music_url ?? '',
-  });
+  const [urls, setUrls] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Live per-field validation, so a bad paste is caught before save rather than
-  // coming back as a Postgres constraint error.
-  const urlErrors = PLATFORMS.reduce<Partial<Record<LinkPlatform, string>>>((acc, platform) => {
-    const message = validateStreamingUrl(platform, urls[platform]);
-    if (message) acc[platform] = message;
+  useEffect(() => {
+    if (!track) return;
+    let cancelled = false;
+
+    void supabase
+      .from('track_links')
+      .select('platform_code, url')
+      .eq('track_id', track.id)
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        setUrls(Object.fromEntries(data.map((row) => [row.platform_code, row.url])));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [track]);
+
+  // Validated against the same pattern the database checks, so a bad paste is
+  // caught here rather than coming back as a constraint violation.
+  const urlErrors = linkPlatforms.reduce<Record<string, string>>((acc, platform) => {
+    const message = validateAgainstPattern(
+      urls[platform.code] ?? '',
+      platform.url_pattern,
+      platform.display_name,
+    );
+    if (message) acc[platform.code] = message;
     return acc;
   }, {});
 
-  const hasAnyLink = PLATFORMS.some((p) => urls[p].trim());
+  const linkRows = Object.entries(urls)
+    .filter(([, url]) => url.trim())
+    .map(([platform_code, url]) => ({ platform_code, url: url.trim() }));
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
 
     if (!title.trim()) return setError('Title is required.');
     if (Object.keys(urlErrors).length > 0) return setError('Fix the streaming links before saving.');
-    if (!hasAnyLink) {
+    if (linkRows.length === 0) {
       return setError(
         'A track needs at least one streaming link. The app only routes fans out — a track with no destination does nothing.',
       );
@@ -60,22 +80,38 @@ export function TrackForm({
       cover_art_url: coverArt,
       release_date: releaseDate || null,
       is_featured: isFeatured,
-      spotify_url: urls.spotify.trim() || null,
-      youtube_url: urls.youtube.trim() || null,
-      apple_music_url: urls.apple.trim() || null,
     };
 
-    const { error: err } = track
-      ? await supabase.from('tracks').update(payload).eq('id', track.id)
-      : await supabase.from('tracks').insert(payload);
+    let trackId = track?.id;
 
-    if (err) {
-      setError(err.message);
-      setBusy(false);
-      return;
+    if (track) {
+      const { error: err } = await supabase.from('tracks').update(payload).eq('id', track.id);
+      if (err) return fail(err.message);
+    } else {
+      const { data, error: err } = await supabase.from('tracks').insert(payload).select('id').single();
+      if (err) return fail(err.message);
+      trackId = data.id;
     }
+
+    if (!trackId) return fail('The track was saved but no id came back.');
+
+    const { error: delErr } = await supabase.from('track_links').delete().eq('track_id', trackId);
+    if (delErr) return fail(delErr.message);
+
+    const { error: insErr } = await supabase
+      .from('track_links')
+      .insert(linkRows.map((row) => ({ ...row, track_id: trackId })));
+    if (insErr) return fail(insErr.message);
+
     await onDone();
+
+    function fail(message: string) {
+      setError(message);
+      setBusy(false);
+    }
   };
+
+  if (platformsLoading) return <Spinner label="Loading platforms…" />;
 
   return (
     <form onSubmit={submit} className="space-y-6">
@@ -88,7 +124,13 @@ export function TrackForm({
           <Input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} />
         </Field>
 
-        <ImageUpload label="Cover art" bucket="cover-art" value={coverArt} onChange={setCoverArt} hint="Square, at least 1000×1000." />
+        <ImageUpload
+          label="Cover art"
+          bucket="cover-art"
+          value={coverArt}
+          onChange={setCoverArt}
+          hint="Square, at least 1000×1000."
+        />
 
         <label className="flex items-center gap-2 text-sm text-ink-200">
           <input
@@ -109,13 +151,12 @@ export function TrackForm({
           </p>
         </div>
 
-        {PLATFORMS.map((platform) => (
-          <Field key={platform} label={PLATFORM_LABELS[platform]} error={urlErrors[platform]}>
+        {linkPlatforms.map((platform) => (
+          <Field key={platform.code} label={platform.display_name} error={urlErrors[platform.code]}>
             <Input
               type="url"
-              placeholder={streamingPlaceholder(platform)}
-              value={urls[platform]}
-              onChange={(e) => setUrls((prev) => ({ ...prev, [platform]: e.target.value }))}
+              value={urls[platform.code] ?? ''}
+              onChange={(e) => setUrls((prev) => ({ ...prev, [platform.code]: e.target.value }))}
             />
           </Field>
         ))}

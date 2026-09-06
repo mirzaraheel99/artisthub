@@ -17,7 +17,7 @@ export function Dashboard() {
     setError(null);
     setCounts(null);
     const [artists, tracks, clicks] = await Promise.all([
-      supabase.from('artists').select('id', { count: 'exact', head: true }),
+      supabase.from('artists').select('id', { count: 'exact', head: true }).eq('is_active', true),
       supabase.from('tracks').select('id', { count: 'exact', head: true }),
       supabase.from('link_clicks').select('id', { count: 'exact', head: true }),
     ]);

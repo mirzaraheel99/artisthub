@@ -1,23 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import type { Artist, LinkPlatform, Track } from '../lib/types';
-import { PLATFORM_LABELS } from '../lib/streamingUrls';
+import type { Artist, Track, TrackLink } from '../lib/types';
+import { usePlatforms } from '../lib/platforms';
 import { TrackForm } from '../components/TrackForm';
 import { Badge, Button, EmptyState, ErrorState, Spinner } from '../components/ui';
-
-const PLATFORMS: LinkPlatform[] = ['spotify', 'youtube', 'apple'];
-
-const URL_FOR: Record<LinkPlatform, (t: Track) => string | null> = {
-  spotify: (t) => t.spotify_url,
-  youtube: (t) => t.youtube_url,
-  apple: (t) => t.apple_music_url,
-};
 
 export function ArtistDetail() {
   const { artistId } = useParams<{ artistId: string }>();
   const [artist, setArtist] = useState<Artist | null>(null);
   const [tracks, setTracks] = useState<Track[] | null>(null);
+  const [links, setLinks] = useState<TrackLink[]>([]);
+  const { linkPlatforms } = usePlatforms();
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Track | 'new' | null>(null);
 
@@ -41,6 +35,14 @@ export function ArtistDetail() {
     }
     setArtist(artistRes.data ?? null);
     setTracks(tracksRes.data ?? []);
+
+    const trackIds = (tracksRes.data ?? []).map((t) => t.id);
+    if (trackIds.length > 0) {
+      const { data } = await supabase.from('track_links').select('*').in('track_id', trackIds);
+      setLinks(data ?? []);
+    } else {
+      setLinks([]);
+    }
   }, [artistId]);
 
   useEffect(() => {
@@ -113,13 +115,14 @@ export function ArtistDetail() {
                 </div>
                 <p className="text-xs text-ink-400">{track.release_date ?? 'No release date'}</p>
                 <div className="mt-1.5 flex gap-1.5">
-                  {PLATFORMS.map((platform) =>
-                    URL_FOR[platform](track) ? (
-                      <Badge key={platform} tone="purple">
-                        {PLATFORM_LABELS[platform]}
+                  {links
+                    .filter((link) => link.track_id === track.id)
+                    .map((link) => (
+                      <Badge key={link.id} tone="purple">
+                        {linkPlatforms.find((p) => p.code === link.platform_code)?.display_name ??
+                          link.platform_code}
                       </Badge>
-                    ) : null,
-                  )}
+                    ))}
                 </div>
               </div>
 

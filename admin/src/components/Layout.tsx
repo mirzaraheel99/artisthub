@@ -36,7 +36,7 @@ export function Layout() {
         </nav>
 
         <div className="mt-auto px-1">
-          <p className="truncate text-xs text-ink-400">{profile?.contact ?? profile?.name ?? 'Signed in'}</p>
+          <p className="truncate text-xs text-ink-400">{profile?.email ?? profile?.display_name ?? 'Signed in'}</p>
           <Button variant="ghost" className="mt-2 w-full text-xs" onClick={signOut}>
             Sign out
           </Button>

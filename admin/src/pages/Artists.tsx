@@ -15,6 +15,7 @@ export function Artists() {
     const { data, error: err } = await supabase
       .from('artists')
       .select('*')
+      .eq('is_active', true)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: false });
 
@@ -44,13 +45,19 @@ export function Artists() {
     await load();
   };
 
-  const remove = async (artist: Artist) => {
+  // Archiving rather than deleting: a hard delete cascades to tracks and their
+  // click history, which silently changes every historical engagement report.
+  const archive = async (artist: Artist) => {
     const ok = window.confirm(
-      `Delete "${artist.name}"? This also deletes every track under this artist and their click history. This cannot be undone.`,
+      `Archive "${artist.name}"? They disappear from the app immediately. ` +
+        `Their tracks and click history are kept so past reports still reconcile.`,
     );
     if (!ok) return;
 
-    const { error: err } = await supabase.from('artists').delete().eq('id', artist.id);
+    const { error: err } = await supabase
+      .from('artists')
+      .update({ is_active: false })
+      .eq('id', artist.id);
     if (err) setError(err.message);
     await load();
   };
@@ -138,8 +145,8 @@ export function Artists() {
                   <Button variant="ghost" className="px-3 py-1.5 text-xs" onClick={() => setEditing(artist)}>
                     Edit
                   </Button>
-                  <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => void remove(artist)}>
-                    Delete
+                  <Button variant="danger" className="px-3 py-1.5 text-xs" onClick={() => void archive(artist)}>
+                    Archive
                   </Button>
                 </div>
               </li>

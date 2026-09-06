@@ -1,4 +1,4 @@
-# Deploying to the Azure server
+# Deploying to the Hetzner server
 
 Self-hosting Supabase is free — the software is open source and you pay only for
 the box. What you take on in exchange is operations: backups, upgrades, TLS and
@@ -98,7 +98,8 @@ crontab -e
 ```
 
 `backup.sh` keeps 14 days locally. Local copies do not survive the VM dying, so
-ship them off-box — Azure Blob Storage via `az storage blob upload` or rclone.
+ship them off-box — Hetzner Object Storage or a Storage Box, via rclone or
+`s3cmd`.
 
 Two things a database dump does **not** cover, and both matter:
 
@@ -130,7 +131,7 @@ Take a backup before any upgrade that moves the Postgres major version.
 - [ ] `ENABLE_EMAIL_AUTOCONFIRM=false`, SMTP configured, signup email confirmed arriving
 - [ ] `preflight.sh` reports zero blockers, and every warning has been read
 - [ ] `COMPOSE_PROJECT_NAME` is set, so no container name collides with an existing one
-- [ ] Azure NSG and any host firewall allow only 22 and 443; 5432 and 8000 are not reachable from outside
+- [ ] Hetzner project firewall and `ufw` both allow only 22 and 443; 5432 and 8000 are not reachable from outside
 - [ ] The applications already on this box are still healthy after installation
 - [ ] Backups running on cron, shipped off-box, and one restore actually tested
 - [ ] `tests/rls_check.sql` and `tests/schema_check.sql` both all-PASS against production

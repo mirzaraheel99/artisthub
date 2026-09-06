@@ -8,14 +8,14 @@ import { ArtistDetail } from './pages/ArtistDetail';
 import { Card, Button, Spinner } from './components/ui';
 
 function Gate() {
-  const { session, profile, loading, signOut } = useAuth();
+  const { session, isAdmin, loading, signOut } = useAuth();
 
   if (loading) return <Spinner label="Checking access…" />;
   if (!session) return <Login />;
 
   // The UI check is a courtesy. RLS is what actually stops a non-admin from
   // reading or writing anything here — see infra/supabase/migrations/0003_rls.sql.
-  if (profile?.role !== 'admin') {
+  if (!isAdmin) {
     return (
       <div className="flex min-h-full items-center justify-center px-4">
         <Card className="max-w-sm text-center">
